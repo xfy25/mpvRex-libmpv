@@ -26,11 +26,11 @@
         {
           "name": "mpvRex-libmpv-0.0.9.aar",
           "url": "mpvRex-libmpv-0.0.9.aar",
-          "size": 78321997,
-          "sha512": "0a66442e062dc2c0c961596ac99580de2e8717ebcd44d3afa91ea13fab4d0065a934154dca9a24213267ce56e8c7b2d069916f5af8999fcef48a3b80ed1f9920",
-          "sha256": "2ea58891508b0f06d9f61796f0eeee464f3f12e42dbac4d84cc989ebbacae69d",
-          "sha1": "d1e6c13e42d5fe60ceb8fb267d475479965887cf",
-          "md5": "59f4a4b8ee6f5d54a7bcb3e6617c2489"
+          "size": 78316238,
+          "sha512": "0aca5c3515653509e271afb6dbb9af5b3572d3e5dbc6b0787beff8d2d48d14f868b012875dbabcf2888f8209574db0adda459454c48b57bd1da73bb2f2c8f943",
+          "sha256": "33c166c84eac6b8bc0356dbb46b3994fec963c18b892f93100ddc4e04609b337",
+          "sha1": "725389ddb7003d071a7ca169b6baf0eae2284fe6",
+          "md5": "395543a48ed8f39740608410c00dda31"
         }
       ]
     },
@@ -62,11 +62,11 @@
         {
           "name": "mpvRex-libmpv-0.0.9.aar",
           "url": "mpvRex-libmpv-0.0.9.aar",
-          "size": 78321997,
-          "sha512": "0a66442e062dc2c0c961596ac99580de2e8717ebcd44d3afa91ea13fab4d0065a934154dca9a24213267ce56e8c7b2d069916f5af8999fcef48a3b80ed1f9920",
-          "sha256": "2ea58891508b0f06d9f61796f0eeee464f3f12e42dbac4d84cc989ebbacae69d",
-          "sha1": "d1e6c13e42d5fe60ceb8fb267d475479965887cf",
-          "md5": "59f4a4b8ee6f5d54a7bcb3e6617c2489"
+          "size": 78316238,
+          "sha512": "0aca5c3515653509e271afb6dbb9af5b3572d3e5dbc6b0787beff8d2d48d14f868b012875dbabcf2888f8209574db0adda459454c48b57bd1da73bb2f2c8f943",
+          "sha256": "33c166c84eac6b8bc0356dbb46b3994fec963c18b892f93100ddc4e04609b337",
+          "sha1": "725389ddb7003d071a7ca169b6baf0eae2284fe6",
+          "md5": "395543a48ed8f39740608410c00dda31"
         }
       ]
     }
