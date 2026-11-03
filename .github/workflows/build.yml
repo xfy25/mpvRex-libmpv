@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        architecture: [ armv7l, arm64, x86, x86_64 ]
+        architecture: [ arm64 ]
     permissions:
       contents: write
 
@@ -52,12 +52,26 @@ jobs:
 
       - name: Build the release artifacts
         run: |
-          set -x
+          set -x -o pipefail
           unset ANDROID_SDK_ROOT
           cd buildscripts
           ./download.sh > /dev/null
-          ./buildall.sh --arch ${{ matrix.architecture }} mpv
-          ./buildall.sh -n
+          (
+            ./buildall.sh --arch ${{ matrix.architecture }} mpv
+            ./buildall.sh -n
+          ) 2>&1 | tee "../build-${{ matrix.architecture }}.log"
+
+      # Jobs logs need a token to download; a release asset does not.
+      - name: Publish build log on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -l build-*.log || true
+          gh release view ci-logs >/dev/null 2>&1 || \
+            gh release create ci-logs --title "CI logs" --notes "build logs" --latest=false
+          cp "build-${{ matrix.architecture }}.log" "build-log-${{ matrix.architecture }}.log" 2>/dev/null || true
+          gh release upload ci-logs "build-log-${{ matrix.architecture }}.log" --clobber
 
       - uses: actions/upload-artifact@v4
         with:
