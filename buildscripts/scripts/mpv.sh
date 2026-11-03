@@ -26,9 +26,18 @@ END
 
 unset CC CXX # meson wants these unset
 
-if [ -f "$DIR/patches/mpv-shaders.patch" ]; then
-	patch -p1 -N --dry-run < "$DIR/patches/mpv-shaders.patch" >/dev/null 2>&1 && patch -p1 < "$DIR/patches/mpv-shaders.patch" || true
-fi
+for p in "$DIR"/patches/*.patch; do
+	[ -e "$p" ] || continue
+	if patch -p1 -N --dry-run --forward < "$p" >/dev/null 2>&1; then
+		echo "Applying $(basename "$p")"
+		patch -p1 --forward < "$p"
+	elif patch -p1 -N --dry-run --reverse < "$p" >/dev/null 2>&1; then
+		echo "$(basename "$p") already applied"
+	else
+		echo >&2 "ERROR: $(basename "$p") does not apply, refusing to build an unpatched libmpv"
+		exit 1
+	fi
+done
 
 meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
 	--default-library shared \

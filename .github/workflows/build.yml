@@ -5,6 +5,7 @@ on:
     branches:
       - '**'
   pull_request:
+  workflow_dispatch:
 
 
 jobs:
@@ -62,3 +63,15 @@ jobs:
         with:
           name: mpv-lib-${{ matrix.architecture }}
           path: app/build/outputs/aar/app-release.aar
+
+      # Artifacts need a token to download; a release asset does not.
+      - name: Publish arm64 AAR as release asset
+        if: matrix.architecture == 'arm64'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view hdr-ci >/dev/null 2>&1 || \
+            gh release create hdr-ci --title "HDR CI builds" \
+              --notes "Automated libmpv AAR builds (arm64)" --latest=false
+          gh release upload hdr-ci \
+            app/build/outputs/aar/app-release.aar#mpvRex-libmpv-arm64.aar --clobber
