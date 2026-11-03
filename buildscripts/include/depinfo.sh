@@ -39,5 +39,11 @@ dep_mpv_android=(mpv)
 # pinned ffmpeg revision
 v_ci_ffmpeg=n8.1.2
 
+# mpv is pinned to the last master commit before the v0.0.9 libmpv build
+# (2026-08-04), i.e. what REX 4.5.0 actually shipped. Later commits raise the
+# Vulkan requirement to >= 1.4.309 and fail to configure: the Android NDK r29
+# still ships Vulkan 1.3.275 headers.
+v_mpv_pin=1d15686142fd5d53c954aab7526cedab05ef9dc3
+
 # filename used to uniquely identify a build prefix
 ci_tarball="prefix-ndk-${v_ndk}-lua-${v_lua}-unibreak-${v_unibreak}-harfbuzz-${v_harfbuzz}-fribidi-${v_fribidi}-freetype-${v_freetype}-mbedtls-${v_mbedtls}-ffmpeg-${v_ci_ffmpeg}.tgz"

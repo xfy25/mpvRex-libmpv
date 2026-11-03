@@ -58,9 +58,9 @@ elif [ "$1" = "install" ]; then
 	msg "Fetching SDK + NDK"
 	IN_CI=1 ./include/download-sdk.sh
 
-	msg "Fetching mpv"
+	msg "Fetching mpv (pinned ${v_mpv_pin})"
 	mkdir -p deps/mpv
-	$WGET https://github.com/mpv-player/mpv/archive/master.tar.gz -O master.tgz
+	$WGET "https://github.com/mpv-player/mpv/archive/${v_mpv_pin}.tar.gz" -O master.tgz
 	tar -xzf master.tgz -C deps/mpv --strip-components=1
 	rm master.tgz
 
