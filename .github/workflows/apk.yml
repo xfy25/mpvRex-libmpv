@@ -93,6 +93,9 @@ jobs:
       - name: Publish APKs as release asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The job never checks out a repo, so gh has no git remote to infer
+          # the repository from.
+          GH_REPO: ${{ github.repository }}
         run: |
           gh release view "$PUBLISH_TAG" >/dev/null 2>&1 || \
             gh release create "$PUBLISH_TAG" --title "REX APK ($REX_REF + HDR libmpv)" \
