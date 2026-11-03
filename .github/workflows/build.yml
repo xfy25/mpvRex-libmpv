@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - '**'
+    paths-ignore:
+      - '.github/workflows/apk.yml'
   pull_request:
   workflow_dispatch:
 

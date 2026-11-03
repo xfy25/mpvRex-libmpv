@@ -1,0 +1,102 @@
+name: apk
+
+# Builds a REX-Player APK against the patched libmpv AAR.
+# The app source is pulled from the public mpvRex/REX-Player repo; nothing of
+# the app is vendored here.
+#
+# Trigger: manual dispatch, or any push that touches this file (that is the
+# no-token way to re-run it).
+
+on:
+  workflow_dispatch:
+    inputs:
+      rex_ref:
+        description: 'REX-Player tag/commit to build'
+        required: true
+        default: 'v4.5.0'
+      aar_url:
+        description: 'libmpv AAR to link against'
+        required: true
+        default: 'https://github.com/xfy25/mpvRex-libmpv/releases/download/hdr-4.5.0/mpvRex-libmpv-arm64.aar'
+      publish_tag:
+        description: 'Release tag for the APKs'
+        required: true
+        default: 'apk-hdr-4.5.0'
+  push:
+    paths:
+      - '.github/workflows/apk.yml'
+
+env:
+  REX_REF: ${{ inputs.rex_ref || 'v4.5.0' }}
+  AAR_URL: ${{ inputs.aar_url || 'https://github.com/xfy25/mpvRex-libmpv/releases/download/hdr-4.5.0/mpvRex-libmpv-arm64.aar' }}
+  PUBLISH_TAG: ${{ inputs.publish_tag || 'apk-hdr-4.5.0' }}
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Wait for the libmpv AAR
+        run: |
+          # The libmpv build runs for ~1h; poll instead of failing immediately.
+          for i in $(seq 1 120); do
+            if curl -fsI "$AAR_URL" >/dev/null 2>&1; then
+              echo "AAR available after ${i} min"; exit 0
+            fi
+            sleep 60
+          done
+          echo "AAR never appeared: $AAR_URL" >&2
+          exit 1
+
+      - name: Fetch REX-Player ${{ env.REX_REF }}
+        run: |
+          git clone --depth 1 --branch "$REX_REF" \
+            https://github.com/mpvRex/REX-Player rex
+          cd rex && git log -1 --format='REX-Player %h %ad %s' --date=short
+
+      - name: Fetch libmpv AAR
+        run: |
+          mkdir -p rex/app/libs
+          curl -fL --retry 3 -o rex/app/libs/mpvRex-libmpv.aar "$AAR_URL"
+          ls -l rex/app/libs/mpvRex-libmpv.aar
+          unzip -l rex/app/libs/mpvRex-libmpv.aar | grep -E 'libmpv\.so|libplayer\.so' || true
+
+      - name: Swap the maven dependency for the local AAR
+        run: |
+          cd rex
+          sed -i 's|implementation(libs.mpv.lib)|implementation(files("libs/mpvRex-libmpv.aar"))|' app/build.gradle.kts
+          grep -n 'mpvRex-libmpv' app/build.gradle.kts
+          ! grep -q 'implementation(libs.mpv.lib)' app/build.gradle.kts
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'adopt'
+          java-version: 17
+          cache: 'gradle'
+
+      - name: Build
+        run: |
+          cd rex
+          chmod +x ./gradlew
+          ./gradlew --no-daemon assembleDebug assembleRelease
+
+      - name: List APKs
+        run: find rex/app/build/outputs/apk -name '*.apk' -printf '%p %s\n' | sort
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rex-apk
+          path: rex/app/build/outputs/apk/**/*.apk
+
+      - name: Publish APKs as release asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$PUBLISH_TAG" >/dev/null 2>&1 || \
+            gh release create "$PUBLISH_TAG" --title "REX APK ($REX_REF + HDR libmpv)" \
+              --notes "Built from mpvRex/REX-Player $REX_REF with the patched libmpv AAR." --latest=false
+          find rex/app/build/outputs/apk -name '*.apk' | while read -r f; do
+            gh release upload "$PUBLISH_TAG" "$f#$(basename "$f")" --clobber
+          done
