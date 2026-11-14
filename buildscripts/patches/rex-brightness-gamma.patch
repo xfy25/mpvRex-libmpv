@@ -1,0 +1,113 @@
+diff --git a/app/src/main/kotlin/xyz/mpv/rex/preferences/PlayerPreferences.kt b/app/src/main/kotlin/xyz/mpv/rex/preferences/PlayerPreferences.kt
+index 3c93fef..fc6fdee 100644
+--- a/app/src/main/kotlin/xyz/mpv/rex/preferences/PlayerPreferences.kt
++++ b/app/src/main/kotlin/xyz/mpv/rex/preferences/PlayerPreferences.kt
+@@ -46,7 +46,9 @@ class PlayerPreferences(
+   val closeAfterReachingEndOfVideo = preferenceStore.getBoolean("close_after_eof", true)
+ 
+   val rememberBrightness = preferenceStore.getBoolean("remember_brightness")
+-  val defaultBrightness = preferenceStore.getFloat("default_brightness", -1f)
++  // Stored in gamma space. New key so values written by builds from before the gamma fix (which
++  // kept a linear luminance here) are ignored instead of being read two stops too bright.
++  val defaultBrightness = preferenceStore.getFloat("default_brightness_gamma", -1f)
+ 
+   val allowGesturesInPanels = preferenceStore.getBoolean("allow_gestures_in_panels")
+   val showSystemStatusBar = preferenceStore.getBoolean("show_system_status_bar")
+diff --git a/app/src/main/kotlin/xyz/mpv/rex/ui/player/PlayerViewModel.kt b/app/src/main/kotlin/xyz/mpv/rex/ui/player/PlayerViewModel.kt
+index 475e5f1..17dd02a 100644
+--- a/app/src/main/kotlin/xyz/mpv/rex/ui/player/PlayerViewModel.kt
++++ b/app/src/main/kotlin/xyz/mpv/rex/ui/player/PlayerViewModel.kt
+@@ -22,6 +22,7 @@ import xyz.mpv.rex.preferences.PlayerPreferences
+ import xyz.mpv.rex.preferences.SubtitlesPreferences
+ import xyz.mpv.rex.repository.wyzie.WyzieSearchRepository
+ import xyz.mpv.rex.repository.wyzie.WyzieSubtitle
++import xyz.mpv.rex.utils.BrightnessScale
+ import xyz.mpv.rex.utils.media.ChecksumUtils
+ import xyz.mpv.rex.utils.media.MediaInfoParser
+ import `is`.xyz.mpv.MPVLib
+@@ -251,6 +252,8 @@ class PlayerViewModel(
+   val isVolumeSliderShown = MutableStateFlow(false)
+   val volumeSliderTimestamp = MutableStateFlow(0L)
+   val brightnessSliderTimestamp = MutableStateFlow(0L)
++  // Gamma space (0..1), matching what the slider shows. Settings already stores 0..255 in the same
++  // space, so this is a plain normalisation; the conversion to linear happens at the window.
+   val currentBrightness =
+     MutableStateFlow(
+       runCatching {
+@@ -1050,7 +1053,7 @@ class PlayerViewModel(
+     val coercedBrightness = brightness.coerceIn(0f, 1f)
+     host.hostWindow.attributes =
+       host.hostWindow.attributes.apply {
+-        screenBrightness = coercedBrightness
++        screenBrightness = BrightnessScale.gammaToLinear(coercedBrightness)
+       }
+     currentBrightness.value = coercedBrightness
+ 
+diff --git a/app/src/main/kotlin/xyz/mpv/rex/ui/player/controls/GestureHandler.kt b/app/src/main/kotlin/xyz/mpv/rex/ui/player/controls/GestureHandler.kt
+index 4aff12b..4467d32 100644
+--- a/app/src/main/kotlin/xyz/mpv/rex/ui/player/controls/GestureHandler.kt
++++ b/app/src/main/kotlin/xyz/mpv/rex/ui/player/controls/GestureHandler.kt
+@@ -414,7 +414,9 @@ fun GestureHandler(
+           var lastVolumeValue = currentVolume
+           var lastMPVVolumeValue = currentMPVVolume ?: 100
+           var lastBrightnessValue = currentBrightness
+-          val brightnessGestureSens = 0.0022f
++          // A full-range brightness swipe now takes ~55% of the view height. The old fixed
++          // 0.0022f/px crossed the whole range in ~455px on a 2400px screen.
++          val brightnessGestureSens = 1f / (size.height * 0.55f).coerceAtLeast(1f)
+           val volumeGestureSens = 0.035f
+           val mpvVolumeGestureSens = 0.035f
+ 
+@@ -702,12 +704,13 @@ fun GestureHandler(
+                         }
+                         val changeBrightness: () -> Unit = {
+                           if (startingY == 0f) startingY = currentPosition.y
+-                          val newBrightness = calculateNewVerticalGestureValue(
+-                            originalBrightness,
+-                            startingY,
+-                            currentPosition.y,
+-                            brightnessGestureSens,
+-                          )
++                          val newBrightness =
++                            calculateNewVerticalGestureValue(
++                              originalBrightness,
++                              startingY,
++                              currentPosition.y,
++                              brightnessGestureSens,
++                            ).coerceIn(0f, 1f)
+ 
+                           if (abs(newBrightness - lastBrightnessValue) > 0.001f) {
+                             viewModel.changeBrightnessTo(newBrightness)
+diff --git a/app/src/main/kotlin/xyz/mpv/rex/utils/BrightnessScale.kt b/app/src/main/kotlin/xyz/mpv/rex/utils/BrightnessScale.kt
+new file mode 100644
+index 0000000..6dd7a25
+--- /dev/null
++++ b/app/src/main/kotlin/xyz/mpv/rex/utils/BrightnessScale.kt
+@@ -0,0 +1,27 @@
++package xyz.mpv.rex.utils
++
++import kotlin.math.sqrt
++
++/**
++ * Converts between the two brightness representations the Android framework uses.
++ *
++ * - **gamma space**: `Settings.System.SCREEN_BRIGHTNESS` (0..255) and everything shown to the user
++ *   (the slider percentage). Roughly perceptually uniform.
++ * - **linear space**: `WindowManager.LayoutParams.screenBrightness` (0f..1f), which the display
++ *   power controller feeds straight into the panel luminance.
++ *
++ * Mixing the two collapses the usable range into the bottom fifth of the slider: a value of 0.2
++ * read from Settings and written back as a linear override lands around 200 nits on a panel that
++ * tops out near 900. Mirrors `android.util.BrightnessUtils`, which is a hidden API.
++ */
++object BrightnessScale {
++  fun gammaToLinear(gamma: Float): Float {
++    val v = gamma.coerceIn(0f, 1f)
++    return if (v <= 0.5f) 2f * v * v else 1f - 2f * (1f - v) * (1f - v)
++  }
++
++  fun linearToGamma(linear: Float): Float {
++    val v = linear.coerceIn(0f, 1f)
++    return if (v <= 0.5f) sqrt(0.5f * v) else 1f - sqrt(0.5f * (1f - v))
++  }
++}

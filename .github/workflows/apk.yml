@@ -21,7 +21,7 @@ on:
       publish_tag:
         description: 'Release tag for the APKs'
         required: true
-        default: 'apk-hdr-4.5.0'
+        default: 'apk-hdr-4.5.0-brightness'
   push:
     paths:
       - '.github/workflows/apk.yml'
@@ -29,7 +29,7 @@ on:
 env:
   REX_REF: ${{ inputs.rex_ref || 'v4.5.0' }}
   AAR_URL: ${{ inputs.aar_url || 'https://github.com/xfy25/mpvRex-libmpv/releases/download/hdr-4.5.0/mpvRex-libmpv-arm64.aar' }}
-  PUBLISH_TAG: ${{ inputs.publish_tag || 'apk-hdr-4.5.0' }}
+  PUBLISH_TAG: ${{ inputs.publish_tag || 'apk-hdr-4.5.0-brightness' }}
 
 jobs:
   apk:
@@ -38,6 +38,8 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v4
+
       - name: Wait for the libmpv AAR
         run: |
           # The libmpv build runs for ~1h; poll instead of failing immediately.
@@ -55,6 +57,14 @@ jobs:
           git clone --depth 1 --branch "$REX_REF" \
             https://github.com/mpvRex/REX-Player rex
           cd rex && git log -1 --format='REX-Player %h %ad %s' --date=short
+
+      - name: Apply REX app patches
+        run: |
+          cd rex
+          for p in ../buildscripts/patches/rex-*.patch; do
+            echo "== applying $(basename "$p")"
+            git apply --verbose "$p"
+          done
 
       - name: Fetch libmpv AAR
         run: |
