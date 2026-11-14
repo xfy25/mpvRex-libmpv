@@ -14,21 +14,10 @@ index 3c93fef..fc6fdee 100644
    val allowGesturesInPanels = preferenceStore.getBoolean("allow_gestures_in_panels")
    val showSystemStatusBar = preferenceStore.getBoolean("show_system_status_bar")
 diff --git a/app/src/main/kotlin/xyz/mpv/rex/ui/player/PlayerViewModel.kt b/app/src/main/kotlin/xyz/mpv/rex/ui/player/PlayerViewModel.kt
-index 475e5f1..f7cd605 100644
+index 475e5f1..26996bb 100644
 --- a/app/src/main/kotlin/xyz/mpv/rex/ui/player/PlayerViewModel.kt
 +++ b/app/src/main/kotlin/xyz/mpv/rex/ui/player/PlayerViewModel.kt
-@@ -2,6 +2,10 @@ package xyz.mpv.rex.ui.player
- 
- import android.content.Context
- import android.content.pm.ActivityInfo
-+import android.hardware.Sensor
-+import android.hardware.SensorEvent
-+import android.hardware.SensorEventListener
-+import android.hardware.SensorManager
- import android.media.AudioManager
- import android.net.Uri
- import android.provider.OpenableColumns
-@@ -22,6 +26,7 @@ import xyz.mpv.rex.preferences.PlayerPreferences
+@@ -22,6 +22,7 @@ import xyz.mpv.rex.preferences.PlayerPreferences
  import xyz.mpv.rex.preferences.SubtitlesPreferences
  import xyz.mpv.rex.repository.wyzie.WyzieSearchRepository
  import xyz.mpv.rex.repository.wyzie.WyzieSubtitle
@@ -36,36 +25,7 @@ index 475e5f1..f7cd605 100644
  import xyz.mpv.rex.utils.media.ChecksumUtils
  import xyz.mpv.rex.utils.media.MediaInfoParser
  import `is`.xyz.mpv.MPVLib
-@@ -97,6 +102,28 @@ class PlayerViewModel(
-   private val wyzieRepository: WyzieSearchRepository by inject()
- 
-   private val browserPreferences: xyz.mpv.rex.preferences.BrowserPreferences by inject()
-+
-+  // Ambient light decides how far the display will let the panel go; see
-+  // BrightnessScale.maxLinearBrightness. 100 lux is a sane default until the first reading.
-+  private var ambientLux = 100f
-+  private val sensorManager =
-+    host.context.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
-+
-+  private val lightListener =
-+    object : SensorEventListener {
-+      override fun onSensorChanged(event: SensorEvent) {
-+        event.values.firstOrNull()?.let { ambientLux = it }
-+      }
-+
-+      override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
-+    }
-+
-+  init {
-+    val light = sensorManager?.getDefaultSensor(Sensor.TYPE_LIGHT)
-+    if (light != null) {
-+      sensorManager?.registerListener(lightListener, light, SensorManager.SENSOR_DELAY_NORMAL)
-+    }
-+  }
-   private val miniPlayerStateManager: MiniPlayerStateManager by inject()
- 
-   // Cache the application context to prevent leaking the Activity context
-@@ -251,6 +278,8 @@ class PlayerViewModel(
+@@ -251,6 +252,8 @@ class PlayerViewModel(
    val isVolumeSliderShown = MutableStateFlow(false)
    val volumeSliderTimestamp = MutableStateFlow(0L)
    val brightnessSliderTimestamp = MutableStateFlow(0L)
@@ -74,23 +34,15 @@ index 475e5f1..f7cd605 100644
    val currentBrightness =
      MutableStateFlow(
        runCatching {
-@@ -1050,7 +1079,7 @@ class PlayerViewModel(
+@@ -1050,7 +1053,7 @@ class PlayerViewModel(
      val coercedBrightness = brightness.coerceIn(0f, 1f)
      host.hostWindow.attributes =
        host.hostWindow.attributes.apply {
 -        screenBrightness = coercedBrightness
-+        screenBrightness = BrightnessScale.outputBrightness(coercedBrightness, ambientLux)
++        screenBrightness = BrightnessScale.outputBrightness(coercedBrightness)
        }
      currentBrightness.value = coercedBrightness
  
-@@ -2232,6 +2261,7 @@ class PlayerViewModel(
- 
-   override fun onCleared() {
-     super.onCleared()
-+    sensorManager?.unregisterListener(lightListener)
-     _screenStateManager.cleanup()
-     ambientModeManager.cleanup()
-   }
 diff --git a/app/src/main/kotlin/xyz/mpv/rex/ui/player/controls/GestureHandler.kt b/app/src/main/kotlin/xyz/mpv/rex/ui/player/controls/GestureHandler.kt
 index 4aff12b..b48dec1 100644
 --- a/app/src/main/kotlin/xyz/mpv/rex/ui/player/controls/GestureHandler.kt
@@ -128,10 +80,10 @@ index 4aff12b..b48dec1 100644
                              viewModel.changeBrightnessTo(newBrightness)
 diff --git a/app/src/main/kotlin/xyz/mpv/rex/utils/BrightnessScale.kt b/app/src/main/kotlin/xyz/mpv/rex/utils/BrightnessScale.kt
 new file mode 100644
-index 0000000..127cd43
+index 0000000..bf09650
 --- /dev/null
 +++ b/app/src/main/kotlin/xyz/mpv/rex/utils/BrightnessScale.kt
-@@ -0,0 +1,42 @@
+@@ -0,0 +1,37 @@
 +package xyz.mpv.rex.utils
 +
 +import kotlin.math.pow
@@ -143,34 +95,29 @@ index 0000000..127cd43
 + * - **gamma space**: `Settings.System.SCREEN_BRIGHTNESS` (0..255) and everything the user sees.
 + * - **linear space**: `WindowManager.LayoutParams.screenBrightness` (0f..1f), applied to the panel.
 + *
-+ * Mixing them collapsed the usable range into the bottom fifth of the slider. Two more gotchas:
++ * Mixing them collapsed the usable range into the bottom fifth of the slider.
 + *
-+ * 1. The display caps the applied brightness by ambient light
-+ *    (`DisplayDeviceConfig.HdrBrightnessData.mMaxBrightnessLimits`, keyed by lux, step lookup).
-+ *    Anything above the cap is silently clamped, which left the top of the slider dead.
-+ * 2. The AOSP `convertGammaToLinear` curve is shallower than a real perceptual curve, so the slider
-+ *    still felt top-heavy. A plain 2.2 gamma tracks perceived brightness closely.
++ * Two more things this fixes:
++ *
++ * 1. The display pipeline only applies brightness up to [MAX_LINEAR]. Above it the value is
++ *    clamped (the panel's SDR range ends at the HBM transition, 0.49791616, and the remaining
++ *    headroom is only unlocked in direct sunlight), which used to leave the top of the slider
++ *    dead. Scaling by [MAX_LINEAR] keeps the whole slider live and deterministic.
++ * 2. The AOSP `convertGammaToLinear` curve is shallower than a real perceptual curve, so the
++ *    slider still felt top-heavy. A plain 2.2 gamma tracks perceived brightness closely.
 + */
 +object BrightnessScale {
 +  private const val GAMMA = 2.2f
++
++  /** Highest linear brightness the display actually applies. Fixed, not ambient dependent. */
++  private const val MAX_LINEAR = 0.5f
 +
 +  /** Slider position (0..1, perceptually uniform) to a linear luminance fraction (0..1). */
 +  fun gammaToLinear(gamma: Float): Float = gamma.coerceIn(0f, 1f).pow(GAMMA)
 +
 +  fun linearToGamma(linear: Float): Float = linear.coerceIn(0f, 1f).pow(1f / GAMMA)
 +
-+  /**
-+   * Highest linear brightness the display will actually apply at this ambient light level.
-+   * Mirrors `DisplayDeviceConfig.HdrBrightnessData.mMaxBrightnessLimits` (step lookup, in lux).
-+   */
-+  fun maxLinearBrightness(ambientLux: Float): Float = when {
-+    ambientLux < 100f -> 0.35f
-+    ambientLux < 1000f -> 0.5f
-+    ambientLux < 10000f -> 0.75f
-+    else -> 1f
-+  }
-+
-+  /** Slider position plus ambient light to the value handed to the window. */
-+  fun outputBrightness(gamma: Float, ambientLux: Float): Float =
-+    (gammaToLinear(gamma) * maxLinearBrightness(ambientLux)).coerceIn(0f, 1f)
++  /** Slider position to the value handed to the window. 100% maps to [MAX_LINEAR]. */
++  fun outputBrightness(gamma: Float): Float =
++    (gammaToLinear(gamma) * MAX_LINEAR).coerceIn(0f, 1f)
 +}
